@@ -1,0 +1,11 @@
+{
+  "name": "node-m-r",
+  "description": "Greg Young's simple CQRS example written using Node.js (https://github.com/gregoryyoung/m-r).",
+  "version": "0.1.0",
+  "author": "Jan Van Ryswyck (http://elegantcode.com)",
+  "engines": {
+    "node": "0.10.x"
+  },
+  "dependencies": {
+  }
+}
