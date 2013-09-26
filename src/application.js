@@ -13,13 +13,13 @@ util.inherits(AggregateRoot, EventEmitter);
 
 // TODO: Create factory method for creating event objects (or at least review/simplify the signature of the apply function)
 
-AggregateRoot.prototype.apply = function(eventName, event) {
+AggregateRoot.prototype.apply = function(domainEventName, domainEvent) {
 	this._eventVersion += 1;
-	event.__version = this._eventVersion;
-	event.__name = eventName;
+	domainEvent.__version = this._eventVersion;
+	domainEvent.__name = domainEventName;
 
-	this._transientEvents.push(event);
-	this.emit(event.__name, event);
+	this._transientEvents.push(domainEvent);
+	this.emit(domainEvent.__name, domainEvent);
 };
 
 AggregateRoot.prototype.loadFrom = function(domainEvents) {
