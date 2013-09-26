@@ -7,5 +7,6 @@
     "node": "0.10.x"
   },
   "dependencies": {
+    "eventemitter2": "0.4.x"
   }
 }
