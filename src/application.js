@@ -1,6 +1,5 @@
 var util = require('util');
-var ReadableStream = require('stream').Readable;
-var WritableStream = require('stream').Writable;
+var stream = require('stream');
 var EventEmitter = require('eventemitter2').EventEmitter2;
 var _ = require('lodash');
 
@@ -13,10 +12,10 @@ var AggregateRoot = exports.AggregateRoot = function(id) {
 	this._transientEvents = [];
 
 	this._eventEmitter = new EventEmitter();
-	ReadableStream.call(this, { objectMode: true });
+	stream.Readable.call(this, { objectMode: true });
 };
 
-util.inherits(AggregateRoot, ReadableStream);
+util.inherits(AggregateRoot, stream.Readable);
 
 AggregateRoot.prototype.apply = function(eventName, eventBody) {
 	var domainEvent;
@@ -39,13 +38,15 @@ AggregateRoot.prototype.loadFrom = function(history) {
 	_version = _eventVersion = history[indexOfLastDomainEvent].version;
 }
 
-AggregateRoot.prototype.on = function(type, listener) {
+AggregateRoot.prototype.onEvent = function(type, listener) {
 	return this._eventEmitter.on(type, listener);
 };
 
 AggregateRoot.prototype._read = function() {
-	if(0 === this._transientEvents.length)
-		return this.push(null);
+	if(0 === this._transientEvents.length) {
+		this.push(null);
+		return;
+	}
 
 	this.push(this._transientEvents[0]);
 	this._transientEvents.shift();
@@ -80,23 +81,23 @@ util.inherits(InvalidOperationError, Error);
 
 
 var InventoryItem = function(id, name) {
-	var self = this;
+	var self = this;	
 
-	self._activated;
-	self._name;
+	this._activated;
+	this._name;
 
-	AggregateRoot.call(self, id);
+	AggregateRoot.call(this, id);
 
-	self.on('InventoryItemCreated', function(inventoryItemCreated) {
+	this.onEvent('InventoryItemCreated', function(inventoryItemCreated) {
 		self._activated = true;
 		self._name = inventoryItemCreated.name;
 	});
 
-	self.on('InventoryItemDeactivated', function(inventoryItemDeactivated) {
+	this.onEvent('InventoryItemDeactivated', function(inventoryItemDeactivated) {
 		self._activated = false;
 	});
 
-	self.apply('InventoryItemCreated', {
+	this.apply('InventoryItemCreated', {
 		id: id,
 		name: name
 	});
@@ -130,13 +131,19 @@ var create = function(id, name) {
 // TODO Jan: Remove !!
 //
 var InventoryItemRepository = function() {
-	WritableStream.call(this, { objectMode: true });
+	var self = this;
+
+	stream.Writable.call(this, { objectMode: true });
+
+	this.on('finish', function() {
+		console.log('Finished writing events, now flush!!');
+	});
 };
 
-util.inherits(InventoryItemRepository, WritableStream);
+util.inherits(InventoryItemRepository, stream.Writable);
 
 
-InventoryItemRepository.prototype._write = function(chunk, enc, next) {
+InventoryItemRepository.prototype._write = function(chunk, encoding, next) {
 	console.log(chunk);
 	next();
 };
@@ -196,4 +203,7 @@ var repository = new InventoryItemRepository();
 
 var inventoryItem = create(121, 'Something');	// TODO Jan: GUID!!
 inventoryItem.deactivate();
+
 inventoryItem.pipe(repository);
+
+
