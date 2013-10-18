@@ -3,8 +3,6 @@ var stream = require('stream');
 var EventEmitter = require('eventemitter2').EventEmitter2;
 var _ = require('lodash');
 
-
-
 // TODO: Apply Class pattern from Mathias !!
 var AggregateRoot = exports.AggregateRoot = function(id) {
 	this._id = id;
@@ -17,15 +15,14 @@ var AggregateRoot = exports.AggregateRoot = function(id) {
 
 util.inherits(AggregateRoot, stream.Readable);
 
-AggregateRoot.prototype.apply = function(eventName, eventBody) {
+AggregateRoot.prototype.apply = function(eventName, domainEvent) {
 	var domainEvent;
-	var originalEventBody = _.clone(eventBody);
 
 	this._eventVersion += 1;
-	domainEvent = createDomainEvent(this, eventName, this._eventVersion, eventBody);
+	enhanceDomainEvent(this, eventName, this._eventVersion, domainEvent);
 
 	this._transientEvents.push(domainEvent);
-	this._eventEmitter.emit(eventName, originalEventBody);
+	this._eventEmitter.emit(eventName, domainEvent);
 };
 
 AggregateRoot.prototype.loadFrom = function(history) {
@@ -48,19 +45,21 @@ AggregateRoot.prototype._read = function() {
 		return;
 	}
 
-	this.push(this._transientEvents[0]);
+	var eventStreamObject = {
+		aggregateRootId: this._id,
+		aggregateRootVersion: this._version,
+		domainEvent: this._transientEvents[0]
+	}
+
+	this.push(eventStreamObject);
 	this._transientEvents.shift();
 };
 
-function createDomainEvent(aggregateRoot, eventName, eventVersion, eventBody) {
-	eventBody.__name = eventName;
-	eventBody.__version = eventVersion;
-
-	return {
-		aggregateRootId: aggregateRoot._id,
-		aggregateRootVersion: aggregateRoot._version,
-		eventBody: eventBody
-	};
+function enhanceDomainEvent(aggregateRoot, eventName, eventVersion, domainEvent) {
+	domainEvent.aggregateRootId = aggregateRoot._id;
+	domainEvent.eventId = 11; 		// TODO Jan: Generate GUID!!
+	domainEvent.eventName = eventName;
+	domainEvent.eventVersion = eventVersion;
 }
 
 
@@ -83,8 +82,8 @@ util.inherits(InvalidOperationError, Error);
 var InventoryItem = function(id, name) {
 	var self = this;	
 
-	this._activated;
-	this._name;
+	this._activated = true;
+	this._name = '';
 
 	AggregateRoot.call(this, id);
 
@@ -98,7 +97,6 @@ var InventoryItem = function(id, name) {
 	});
 
 	this.apply('InventoryItemCreated', {
-		id: id,
 		name: name
 	});
 };
@@ -109,9 +107,7 @@ InventoryItem.prototype.deactivate = function() {
 	if(!this._activated)
 		throw new InvalidOperationError('This inventory item has already been deactivated.');
 
-	this.apply('InventoryItemDeactivated', {
-		id: this._id
-	});
+	this.apply('InventoryItemDeactivated', {});
 };
 
 // This function should be exported
@@ -119,34 +115,6 @@ var create = function(id, name) {
 	return new InventoryItem(id, name);
 };
 
-
-
-
-
-
-
-
-
-//
-// TODO Jan: Remove !!
-//
-var InventoryItemRepository = function() {
-	var self = this;
-
-	stream.Writable.call(this, { objectMode: true });
-
-	this.on('finish', function() {
-		console.log('Finished writing events, now flush!!');
-	});
-};
-
-util.inherits(InventoryItemRepository, stream.Writable);
-
-
-InventoryItemRepository.prototype._write = function(chunk, encoding, next) {
-	console.log(chunk);
-	next();
-};
 
 
 //
@@ -166,44 +134,89 @@ util.inherits(ConcurrencyViolationError, Error);
 //
 // EventStore
 //
-var eventStore = new (function() {
-	var _store = [];
+var EventStore = function() {
+	var self = this;
 
-	this.Save = function(domainEvents, aggregateRootId, aggregateRootVersion) {
-		// TODO Jan: Replace with function !!
-		var aggregateRoot = _.find(store, { 'aggregateRootId': aggregateRootId });
+	this._store = [];
+	this._transientCache = [];
 
-		if(!aggregateRoot) {
-			aggregateRoot = {
-				id: aggregateRootId,
-				version: aggregateRootVersion,
-				events: []
-			};
+	stream.Writable.call(this, { objectMode: true });
 
-			_store.Add(aggregateRoot);
-		}
+	this.on('finish', function() {
+		self.flushBuffer();
+	});
+
+	this.flushBuffer = function() {
+		this._transientCache.forEach(function(transientAggregateRoot) {
+			self.save(transientAggregateRoot);
+		});
+
+		// Clear the transient cache
+		this._transientCache.length = 0;
+	};
+
+	this.save = function(transientAggregateRoot) {
+		var storedAggregateRoot = _.find(this._store, function(ar) {
+			return ar.id === transientAggregateRoot.id;
+		});
+
+		if(!storedAggregateRoot) {
+			incrementVersionOf(transientAggregateRoot, transientAggregateRoot.events.length);
+			this._store.push(transientAggregateRoot);
+			return;
+		} 
 
 		// TODO Jan: Make sure that next(error) is called for the write stream !!
-		if(aggregateRoot.version !== aggregateRootVersion)
+		if(storedAggregateRoot.version !== transientAggregateRoot.version)
 			throw new ConcurrencyViolationError('An operation has been performed on an aggregate root that is out of date.');
 
-		domainEvents.foreach(function(domainEvent) {
-			aggregateRoot.events.push(domainEvent);
+		incrementVersionOf(storedAggregateRoot, transientAggregateRoot.events.length);
+
+		transientAggregateRoot.events.forEach(function(domainEvent) {
+			storedAggregateRoot.events.push(domainEvent);
 		});
+	};
+
+	function incrementVersionOf(aggregateRoot, delta) {
+		aggregateRoot.version += delta;
 	}
-})();
+};
 
+util.inherits(EventStore, stream.Writable);
 
+EventStore.prototype._write = function(eventStreamObject, encoding, next) {
+	var transientAggregateRoot = _.find(this._transientCache, function(buffered) {
+		return buffered.id === eventStreamObject.aggregateRootId;
+	});	
+
+	if(!transientAggregateRoot) {
+		transientAggregateRoot = {
+			id: eventStreamObject.aggregateRootId,
+			version: eventStreamObject.aggregateRootVersion,
+			events: []
+		};
+
+		this._transientCache.push(transientAggregateRoot);
+	}
+
+	transientAggregateRoot.events.push(eventStreamObject.domainEvent);
+	next();
+};
 
 
 
 
 // Command handler code
-var repository = new InventoryItemRepository();
+var eventStore = new EventStore();
 
 var inventoryItem = create(121, 'Something');	// TODO Jan: GUID!!
 inventoryItem.deactivate();
 
-inventoryItem.pipe(repository);
+inventoryItem.pipe(eventStore);
+
+setTimeout(function() {
+	_.forEach(eventStore._store, function(ar) { console.log(ar); });
+}, 5000);
+
 
 
