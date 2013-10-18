@@ -1,7 +1,8 @@
-var util = require('util');
-var stream = require('stream');
-var EventEmitter = require('eventemitter2').EventEmitter2;
-var _ = require('lodash');
+var util = require('util'),
+	stream = require('stream'),
+	EventEmitter = require('eventemitter2').EventEmitter2,
+	uuidGenerator = require('node-uuid'),
+	_ = require('lodash');
 
 // TODO: Apply Class pattern from Mathias !!
 var AggregateRoot = exports.AggregateRoot = function(id) {
@@ -57,7 +58,7 @@ AggregateRoot.prototype._read = function() {
 
 function enhanceDomainEvent(aggregateRoot, eventName, eventVersion, domainEvent) {
 	domainEvent.aggregateRootId = aggregateRoot._id;
-	domainEvent.eventId = 11; 		// TODO Jan: Generate GUID!!
+	domainEvent.eventId = uuidGenerator.v1();
 	domainEvent.eventName = eventName;
 	domainEvent.eventVersion = eventVersion;
 }
@@ -166,7 +167,6 @@ var EventStore = function() {
 			return;
 		} 
 
-		// TODO Jan: Make sure that next(error) is called for the write stream !!
 		if(storedAggregateRoot.version !== transientAggregateRoot.version)
 			throw new ConcurrencyViolationError('An operation has been performed on an aggregate root that is out of date.');
 
@@ -209,7 +209,7 @@ EventStore.prototype._write = function(eventStreamObject, encoding, next) {
 // Command handler code
 var eventStore = new EventStore();
 
-var inventoryItem = create(121, 'Something');	// TODO Jan: GUID!!
+var inventoryItem = create(uuidGenerator.v1(), 'Something');
 inventoryItem.deactivate();
 
 inventoryItem.pipe(eventStore);

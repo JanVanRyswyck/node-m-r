@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "eventemitter2": "0.4.x",
-    "lodash": "2.x.x"
+    "lodash": "2.x.x",
+    "node-uuid": "1.x.x"
   }
 }
