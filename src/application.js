@@ -2,48 +2,8 @@ var util = require('util'),
 	stream = require('stream'),
 	EventEmitter = require('eventemitter2').EventEmitter2,
 	uuidGenerator = require('node-uuid'),
+	either = require('./either');
 	_ = require('lodash');
-
-//
-// DomainEventStream
-//
-var DomainEventStream = function(aggregateRootId) {
-	var self = this;
-
-	this._aggregateRootId = aggregateRootId;
-	this._domainEvents = [];	// Do not rename to _events (there be dragons) !!
-	this._streamReadIndex = 0;
-	
-	stream.Duplex.call(this, { objectMode: true });
-};
-
-util.inherits(DomainEventStream, stream.Duplex);
-
-DomainEventStream.prototype.getAggregateRootId = function() {
-	return this._aggregateRootId;
-};
-
-DomainEventStream.prototype.getVersion = function() {
-	var indexOfLastEvent = this._domainEvents.length - 1;
-	return this._domainEvents[indexOfLastEvent].eventVersion;
-};
-
-DomainEventStream.prototype._read = function() {
-	if(this._streamReadIndex === this._domainEvents.length) {
-		this._streamReadIndex = 0;
-		return this.push(null);
-	}
-		
-	this.push(this._domainEvents[this._streamReadIndex]);
-	this._streamReadIndex += 1;
-};
-
-DomainEventStream.prototype._write = function(event, encoding, next) {
-	this._domainEvents.push(event);
-	next();
-};
-
-
 
 
 //
@@ -73,13 +33,11 @@ AggregateRoot.prototype.apply = function(eventName, domainEvent) {
 };
 
 AggregateRoot.prototype.getTransientEvents = function() {
-	var transientEventStream = new DomainEventStream(this._id);
+	return this._transientEvents;
+};
 
-	this._transientEvents.forEach(function(transientEvent) {
-		transientEventStream.write(transientEvent);
-	});
-
-	return transientEventStream;
+AggregateRoot.prototype.getId = function() {
+	return this._id;
 };
 
 AggregateRoot.prototype.getVersion = function() {
@@ -92,7 +50,9 @@ AggregateRoot.prototype.onEvent = function(type, listener) {
 
 AggregateRoot.prototype._write = function(domainEvent, encoding, next) {
 	this._eventEmitter.emit(domainEvent.eventName, domainEvent);
-	this._version = this._eventVersion += 1;
+	
+	this._eventVersion += 1;
+	this._version += 1;
 	next();
 };
 
@@ -121,6 +81,9 @@ util.inherits(InvalidOperationError, Error);
 
 
 
+//
+// InventoryItem
+//
 var InventoryItem = function(id, name) {
 	var self = this;	
 
@@ -194,38 +157,65 @@ var EventStore = function() {
 	this._store = [];
 };
 
-EventStore.prototype.getAllEventsFor = function(aggregateRootId) {
-	return findStoredEventStream(this, aggregateRootId);
-};
+EventStore.prototype.getAllEventsFor = function(aggregateRootId, callback) {
+	findStoredDomainEvents(this, aggregateRootId, function(error, storedDocument) {
+		var eventStream;
 
-EventStore.prototype.save = function(eventStream, expectedAggregateRootVersion, callback) {
-	var storedEventStream = findStoredEventStream(this, eventStream.getAggregateRootId());
-	if(!storedEventStream) {
-		this._store.push(eventStream);
-		
-		process.nextTick(function() {
-			callback(null);
+		if(error)
+			return callback(error);
+					
+		if(!storedDocument)
+			return callback(null);
+
+		eventStream = new stream.PassThrough({ objectMode: true });
+
+		storedDocument.events.forEach(function(domainEvent) {
+			eventStream.write(domainEvent);
 		});
 
-		return;
-	}
-
-	if(storedEventStream.getVersion() !== expectedAggregateRootVersion)
-		throw new ConcurrencyViolationError('An operation has been performed on an aggregate root that is out of date.');
-
-	eventStream.pipe(storedEventStream)
-		.on('error', function(error) {
-			callback(error);
-		})
-		.on('finish', function() {
-			callback(null);
-		});
+		eventStream.end();
+		callback(null, eventStream);
+	});
 };
 
-function findStoredEventStream(eventStore, aggregateRootId) {
-	return _.find(eventStore._store, function(storedEventStream) {
-		return storedEventStream.getAggregateRootId() === aggregateRootId;
-	});	
+EventStore.prototype.save = function(domainEvents, aggregateRootId, expectedAggregateRootVersion, callback) {
+	var self = this;
+
+	findStoredDomainEvents(this, aggregateRootId, function(error, storedDocument) {
+		if(error)
+			return callback(error);
+
+		if(!storedDocument) {
+			var storedDocument = {
+				id: aggregateRootId,
+				events: domainEvents
+			};
+
+			self._store.push(storedDocument);
+			return callback(null);
+		}
+
+		if(_.last(storedDocument.events).eventVersion !== expectedAggregateRootVersion) {
+			var concurrencyViolation = new ConcurrencyViolationError('An operation has been performed on an aggregate root that is out of date.');
+			return callback(concurrencyViolation);
+		}
+
+		domainEvents.forEach(function(domainEvent) {
+			storedDocument.events.push(domainEvent);
+		});
+
+		callback(null);
+	});
+}
+
+function findStoredDomainEvents(eventStore, aggregateRootId, callback) {
+	process.nextTick(function() {
+		var storedDocument = _.find(eventStore._store, function(document) {
+			return document.id === aggregateRootId;
+		});
+
+		callback(null, storedDocument);
+	});
 }
 
 
@@ -234,49 +224,331 @@ function findStoredEventStream(eventStore, aggregateRootId) {
 //
 // InventoryItemRepository
 //
-var InventoryItemRepository = function() {
-	this._eventStore = new EventStore();
+var InventoryItemRepository = function(messageBus) {
+	this._eventStore = new EventStore();   // TODO: Make EventStore a singleton!!
+	this._messageBus = messageBus;
 };
 
-InventoryItemRepository.prototype.save2000 = function(inventoryItem, callback) {
-	var eventStream = inventoryItem.getTransientEvents();
-	this._eventStore.save(eventStream, inventoryItem.getVersion(), callback);
+InventoryItemRepository.prototype.save = function(inventoryItem, callback) {
+	var self = this;
+	var transientEvents = inventoryItem.getTransientEvents();
+
+	this._eventStore.save(transientEvents, inventoryItem.getId(), inventoryItem.getVersion(), function(error) {
+		if(error)
+			return callback(error);
+
+		transientEvents.forEach(function(domainEvent) {
+			self._messageBus.publish(domainEvent);
+		});
+		
+		callback(null);	// TODO: Do some serious error handling	
+	});
 }
 
 InventoryItemRepository.prototype.get = function(inventoryItemId, callback) {
-	var eventStream = this._eventStore.getAllEventsFor(inventoryItemId);
-	if(!eventStream)
-		return null;
+	this._eventStore.getAllEventsFor(inventoryItemId, function(error, eventStream) {
+		if(error)
+			return callback(error);
 
-	var inventoryItem = new InventoryItem(inventoryItemId);
+		if(!eventStream)
+			return callback(null);
 
-	eventStream.pipe(inventoryItem)
-		.on('error', function(error) {
-			callback(error);
-		})
-		.on('finish', function() {
-			callback(null, inventoryItem);
-		});
+		var inventoryItem = new InventoryItem(inventoryItemId);
+
+		eventStream.pipe(inventoryItem)
+			.on('error', function(error) {
+				callback(error);
+			})
+			.on('finish', function() {
+				eventStream.unpipe();
+				callback(null, inventoryItem);
+			});
+	});
 };
 
 
 
+
+
+//
+// InvalidDataAreaError
+//
+var InvalidDataAreaError = exports.InvalidDataAreaError = function(message, error) {
+	this.error = error;
+	this.name = 'InvalidDataAreaError';
+
+	Error.call(this, message);
+	Error.captureStackTrace(this, arguments.callee);
+};
+
+util.inherits(InvalidDataAreaError, Error);
+
+//
+// ReportDatabase
+//
+
+var reportDatabase = (function() {
+	var _this = {};
+
+	var _dataAreas = {
+		InventoryReports: [],
+		InventoryDetailsReports: []
+	};
+
+	_this.getReport = function(dataArea, id, callback) {
+		simulateAsynchronousIO(function() {
+			getReportsCollectionFor(dataArea).fold(
+				function left(error) {
+					callback(error);
+				},
+				function right(reportsCollection) {
+					var requestedReport = _.find(reportsCollection, function(report) {
+						return report.id === id;
+					});
+
+					callback(null, requestedReport);
+				}
+			);
+		});
+	};
+
+	_this.getAllReports = function(dataArea, callback) {
+		simulateAsynchronousIO(function() {
+			getReportsCollectionFor(dataArea).fold(
+				function left(error) {
+					callback(error);
+				},
+				function right(reportsCollection) {
+					callback(null, reportsCollection);
+				}
+			);
+		});
+	};
+
+	_this.insertReport = function(dataArea, inventoryReport, callback) {
+		simulateAsynchronousIO(function() {
+			getReportsCollectionFor(dataArea).fold(
+				function left(error) { 
+					callback(error); 
+				},
+				function right(reportsCollection) {
+					reportsCollection.push(inventoryReport);
+					callback(null);		
+				}
+			);
+		});
+	};
+
+	_this.removeReport = function(dataArea, id, callback) {
+		simulateAsynchronousIO(function() {
+			getReportsCollectionFor(dataArea).fold(
+				function left(error) {
+					callback(error);
+				},
+				function right(reportsCollection) {
+					_.remove(reportsCollection, function(report) {
+						return report.id === id;
+					});
+
+					callback(null);
+				}
+			);
+		});
+	};
+
+	function simulateAsynchronousIO(asynchronousAction) {
+		process.nextTick(asynchronousAction);
+	}
+
+	function getReportsCollectionFor(dataArea) {
+		reportsCollection = _dataAreas[dataArea];
+
+		if(reportsCollection)
+			return either.right(reportsCollection);
+		else
+			return either.left(new InvalidDataAreaError('The specified data area is unknown.'));
+	}
+
+	return _this;
+})();
+
+
+
+//
+// ReportAggregator
+//
+var ReportAggregator = function() {
+	stream.Writable.call(this, { objectMode: true });
+};
+
+util.inherits(ReportAggregator, stream.Writable);
+
+ReportAggregator.prototype._write = function(domainEvent, encoding, next) {
+
+	var eventHandlerName = 'handle' + domainEvent.eventName;
+	var eventHandler = this[eventHandlerName] || function() {};
+
+	eventHandler(domainEvent, function(error) {
+		if(error) {
+			// TODO Jan: setup decent logging (log error + domain event)
+			console.log(error);	
+			return;
+		}
+			
+		next();
+	});
+};
+
+//
+// ReportNotFoundError
+//
+var ReportNotFoundError = exports.ReportNotFoundError = function(message, error) {
+	this.error = error;
+	this.name = 'ReportNotFoundError';
+
+	Error.call(this, message);
+	Error.captureStackTrace(this, arguments.callee);
+};
+
+util.inherits(ReportNotFoundError, Error);
+
+
+//
+// InventoryReportAggregator
+//
+var INVENTORY_REPORTS = 'InventoryReports';
+
+var InventoryReportAggregator = function() {
+	ReportAggregator.call(this, { objectMode: true });
+};
+
+util.inherits(InventoryReportAggregator, ReportAggregator);
+
+InventoryReportAggregator.prototype.handleInventoryItemCreated = function(message, callback) {
+	var inventoryReport = {
+		id: message.aggregateRootId,
+		name: message.name
+	};
+
+	reportDatabase.insertReport(INVENTORY_REPORTS, inventoryReport, callback);
+};
+
+InventoryReportAggregator.prototype.handleInventoryItemRenamed = function(message, callback) {
+	reportDatabase.getReport(INVENTORY_REPORTS, message.aggregateRootId, function(error, inventoryReport) {
+		var errorMessage;
+
+		if(error)
+			return callback(error);
+
+		if(!inventoryReport) {
+			errorMesage = utilities.format('The report for identifier "%d" could not be found in the data store.', message.aggregateRootId);
+			return callback(new ReportNotFoundError(errorMessage));
+		}
+
+		inventoryReport.name = message.name;
+		callback(null);
+	});
+};
+
+InventoryReportAggregator.prototype.handleInventoryItemDeactivated = function(message, callback) {
+	reportDatabase.removeReport(INVENTORY_REPORTS, message.aggregateRootId, callback);
+};
+
+
+// TODO: Add extra information to the report !!!!
+//
+// InventoryDetailsReportAggregator
+//
+var INVENTORY_DETAILS_REPORTS = 'InventoryDetailsReports';
+
+var InventoryDetailsReportAggregator = function() {
+	ReportAggregator.call(this, { objectMode: true });
+};
+
+util.inherits(InventoryDetailsReportAggregator, ReportAggregator);
+
+InventoryDetailsReportAggregator.prototype.handleInventoryItemCreated = function(message, callback) {
+	var inventoryDetailsReport = {
+		id: message.aggregateRootId,
+		name: message.name
+	};
+
+	reportDatabase.insertReport(INVENTORY_DETAILS_REPORTS, inventoryDetailsReport, callback);
+};
+
+InventoryDetailsReportAggregator.prototype.handleInventoryItemRenamed = function(message, callback) {
+	reportDatabase.getReport(INVENTORY_DETAILS_REPORTS, message.aggregateRootId, function(error, inventoryReport) {
+		var errorMessage;
+
+		if(error)
+			return callback(error);
+
+		if(!inventoryReport) {
+			errorMesage = utilities.format('The report for identifier "%d" could not be found in the data store.', message.aggregateRootId);
+			return callback(new ReportNotFoundError(errorMessage));
+		}
+
+		inventoryReport.name = message.name;
+		callback(null);
+	});
+};
+
+InventoryDetailsReportAggregator.prototype.handleInventoryItemDeactivated = function(message, callback) {
+	reportDatabase.removeReport(INVENTORY_REPORTS, message.aggregateRootId, callback);
+};
+
+//
+// MessageBus
+//
+var MessageBus = function() {
+	this._eventHandlers = [];
+};
+
+MessageBus.prototype.registerEventHandler = function(eventHandler) {
+	this._eventHandlers.push(eventHandler);
+};
+
+MessageBus.prototype.publish = function(domainEvent) {
+	this._eventHandlers.forEach(function(eventHandler) {
+		process.nextTick(function() {
+			eventHandler.write(domainEvent);	
+		});
+	});
+};
+
+
+
+
+
+
+//
+// Bootstrapping code
+//
+var messageBus = new MessageBus();
+var repository = new InventoryItemRepository(messageBus);
+
+var inventoryReportAggregator = new InventoryReportAggregator();
+messageBus.registerEventHandler(inventoryReportAggregator);
+
+var inventoryDetailsReportAggregator = new InventoryDetailsReportAggregator();
+messageBus.registerEventHandler(inventoryDetailsReportAggregator);
 
 
 console.log('======================================================');
 console.log('Begin first command handler');
 console.log('======================================================');
 
-// Command handler code
-var repository = new InventoryItemRepository();
-
 var inventoryItemId = uuidGenerator.v1();
 var inventoryItem = create(inventoryItemId, 'Something');
-inventoryItem.deactivate();
+//inventoryItem.deactivate();	// TODO Jan: Replace with adding an item !!!!
 
-repository.save2000(inventoryItem, function(error) {
+repository.save(inventoryItem, function(error) {
 	// TODO: Handle error + test error scenario!!
-	_.forEach(repository._eventStore._store, function(es) { console.log(es._domainEvents); });
+	printEventStoreContent();
+
+	setTimeout(function() {
+		printReportDatabaseContent();
+	}, 2000);
 });
 
 setTimeout(function() {
@@ -291,9 +563,49 @@ function secondCommandHandler() {
 	repository.get(inventoryItemId, function(error, inventoryItem) {
 		inventoryItem.rename('Something entirely different');
 
-		repository.save2000(inventoryItem, function(error) {
+		repository.save(inventoryItem, function(error) {
 			// TODO: Handle error + test error scenario!!
-			_.forEach(repository._eventStore._store, function(es) { console.log(es._domainEvents); });
+			printEventStoreContent();
+
+			setTimeout(function() {
+				printReportDatabaseContent();
+			}, 2000);
+		});
+	});
+
+	setTimeout(function() {
+		thirdCommandHandler();
+	}, 4000);
+};
+
+function thirdCommandHandler() {
+	console.log('======================================================');
+	console.log('Begin third command handler');
+	console.log('======================================================');
+
+	repository.get(inventoryItemId, function(error, inventoryItem) {
+		inventoryItem.deactivate();
+
+		repository.save(inventoryItem, function(error) {
+			// TODO: Handle error + test error scenario!!
+			printEventStoreContent();
+
+			setTimeout(function() {
+				printReportDatabaseContent();
+			}, 2000);
 		});
 	});
 };
+
+function printEventStoreContent() {
+	_.forEach(repository._eventStore._store, function(document) { console.log(document.events); });
+}
+
+function printReportDatabaseContent() {
+	console.log('******************************************************');
+	console.log('Inventory reports');
+	console.log('******************************************************');
+	reportDatabase.getAllReports('InventoryReports', function(error, inventoryReports) {
+		console.log(inventoryReports);
+	});
+}
