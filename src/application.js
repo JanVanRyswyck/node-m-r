@@ -85,24 +85,33 @@ util.inherits(InvalidOperationError, Error);
 // InventoryItem
 //
 var InventoryItem = function(id, name) {
-	var self = this;	
+	var _this = this;	
 
 	this._activated = true;
 	this._name = '';
+	this._number = 0;
 
 	AggregateRoot.call(this, id);
 
 	this.onEvent('InventoryItemCreated', function(inventoryItemCreated) {
-		self._activated = true;
-		self._name = inventoryItemCreated.name;
-	});
-
-	this.onEvent('InventoryItemDeactivated', function(inventoryItemDeactivated) {
-		self._activated = false;
+		_this._activated = true;
+		_this._name = inventoryItemCreated.name;
 	});
 
 	this.onEvent('InventoryItemRenamed', function(inventoryItemRenamed) {
-		self._name = inventoryItemRenamed.name;
+		_this._name = inventoryItemRenamed.name;
+	});
+
+	this.onEvent('ItemsCheckedInToInventory', function(itemsCheckedInToInventory) {
+		_this._number += itemsCheckedInToInventory.numberOfItems;
+	});
+
+	this.onEvent('ItemsCheckedOutFromInventory', function(itemsCheckedOutFromInventory) {
+		_this._number -= itemsCheckedOutFromInventory.numberOfItems;
+	});
+
+	this.onEvent('InventoryItemDeactivated', function(inventoryItemDeactivated) {
+		_this._activated = false;
 	});
 
 	// TODO Jan: Move this to some sort of initialize method on the prototype and get rid of the create factory method => see class impl CoffeeScript??
@@ -114,6 +123,23 @@ var InventoryItem = function(id, name) {
 };
 
 util.inherits(InventoryItem, AggregateRoot);
+
+InventoryItem.prototype.checkIn = function(numberOfItems) {
+	this.apply('ItemsCheckedInToInventory', {
+		numberOfItems: numberOfItems
+	});
+};
+
+InventoryItem.prototype.checkOut = function(numberOfItems) {
+	if((this._number - numberOfItems) < 0) {
+		var errorMesage = util.format('The inventory needs to replenished in order to checkout %d items.', numberOfItems);
+		throw new InvalidOperationError(errorMesage);
+	}
+
+	this.apply('ItemsCheckedOutFromInventory', {
+		numberOfItems: numberOfItems
+	});
+};
 
 InventoryItem.prototype.deactivate = function() {
 	if(!this._activated)
@@ -384,9 +410,8 @@ var ReportAggregator = function() {
 util.inherits(ReportAggregator, stream.Writable);
 
 ReportAggregator.prototype._write = function(domainEvent, encoding, next) {
-
 	var eventHandlerName = 'handle' + domainEvent.eventName;
-	var eventHandler = this[eventHandlerName] || function() {};
+	var eventHandler = this[eventHandlerName] || dummyEventHandler;
 
 	eventHandler(domainEvent, function(error) {
 		if(error) {
@@ -398,6 +423,11 @@ ReportAggregator.prototype._write = function(domainEvent, encoding, next) {
 		next();
 	});
 };
+
+function dummyEventHandler(domainEvent, callback) {
+	process.nextTick(callback);
+};
+
 
 //
 // ReportNotFoundError
@@ -434,20 +464,20 @@ InventoryReportAggregator.prototype.handleInventoryItemCreated = function(messag
 };
 
 InventoryReportAggregator.prototype.handleInventoryItemRenamed = function(message, callback) {
-	reportDatabase.getReport(INVENTORY_REPORTS, message.aggregateRootId, function(error, inventoryReport) {
-		var errorMessage;
+	reportDatabase.getReport(INVENTORY_REPORTS, message.aggregateRootId, 
+		function(error, inventoryReport) {
+			if(error)
+				return callback(error);
 
-		if(error)
-			return callback(error);
+			if(!inventoryReport) {
+				var errorMesage = util.format('The report for identifier "%d" could not be found in the data store.', message.aggregateRootId);
+				return callback(new ReportNotFoundError(errorMessage));
+			}
 
-		if(!inventoryReport) {
-			errorMesage = utilities.format('The report for identifier "%d" could not be found in the data store.', message.aggregateRootId);
-			return callback(new ReportNotFoundError(errorMessage));
+			inventoryReport.name = message.name;
+			callback(null);
 		}
-
-		inventoryReport.name = message.name;
-		callback(null);
-	});
+	);
 };
 
 InventoryReportAggregator.prototype.handleInventoryItemDeactivated = function(message, callback) {
@@ -455,7 +485,6 @@ InventoryReportAggregator.prototype.handleInventoryItemDeactivated = function(me
 };
 
 
-// TODO: Add extra information to the report !!!!
 //
 // InventoryDetailsReportAggregator
 //
@@ -469,6 +498,7 @@ util.inherits(InventoryDetailsReportAggregator, ReportAggregator);
 
 InventoryDetailsReportAggregator.prototype.handleInventoryItemCreated = function(message, callback) {
 	var inventoryDetailsReport = {
+		currentNumber: 0,
 		id: message.aggregateRootId,
 		name: message.name
 	};
@@ -477,24 +507,58 @@ InventoryDetailsReportAggregator.prototype.handleInventoryItemCreated = function
 };
 
 InventoryDetailsReportAggregator.prototype.handleInventoryItemRenamed = function(message, callback) {
-	reportDatabase.getReport(INVENTORY_DETAILS_REPORTS, message.aggregateRootId, function(error, inventoryReport) {
-		var errorMessage;
+	reportDatabase.getReport(INVENTORY_DETAILS_REPORTS, message.aggregateRootId, 
+		function(error, inventoryReport) {
+			if(error)
+				return callback(error);
 
-		if(error)
-			return callback(error);
+			if(!inventoryReport) {
+				var errorMesage = util.format('The report for identifier "%d" could not be found in the data store.', message.aggregateRootId);
+				return callback(new ReportNotFoundError(errorMessage));
+			}
 
-		if(!inventoryReport) {
-			errorMesage = utilities.format('The report for identifier "%d" could not be found in the data store.', message.aggregateRootId);
-			return callback(new ReportNotFoundError(errorMessage));
+			inventoryReport.name = message.name;
+			callback(null);
 		}
+	);
+};
 
-		inventoryReport.name = message.name;
-		callback(null);
-	});
+InventoryDetailsReportAggregator.prototype.handleItemsCheckedInToInventory = function(message, callback) {
+	reportDatabase.getReport(INVENTORY_DETAILS_REPORTS, message.aggregateRootId, 
+		function(error, inventoryReport) {
+			if(error)
+				return callback(error);
+
+			if(!inventoryReport) {
+				var errorMesage = util.format('The report for identifier "%d" could not be found in the data store.', message.aggregateRootId);
+				return callback(new ReportNotFoundError(errorMessage));
+			}
+
+			inventoryReport.currentNumber += message.numberOfItems;
+			callback(null);
+		}
+	);
+};
+
+InventoryDetailsReportAggregator.prototype.handleItemsCheckedOutFromInventory = function(message, callback) {
+	reportDatabase.getReport(INVENTORY_DETAILS_REPORTS, message.aggregateRootId, 
+		function(error, inventoryReport) {
+			if(error)
+				return callback(error);
+
+			if(!inventoryReport) {
+				var errorMesage = util.format('The report for identifier "%d" could not be found in the data store.', message.aggregateRootId);
+				return callback(new ReportNotFoundError(errorMessage));
+			}
+
+			inventoryReport.currentNumber -= message.numberOfItems;
+			callback(null);
+		}
+	);
 };
 
 InventoryDetailsReportAggregator.prototype.handleInventoryItemDeactivated = function(message, callback) {
-	reportDatabase.removeReport(INVENTORY_REPORTS, message.aggregateRootId, callback);
+	reportDatabase.removeReport(INVENTORY_DETAILS_REPORTS, message.aggregateRootId, callback);
 };
 
 //
@@ -540,7 +604,7 @@ console.log('======================================================');
 
 var inventoryItemId = uuidGenerator.v1();
 var inventoryItem = create(inventoryItemId, 'Something');
-//inventoryItem.deactivate();	// TODO Jan: Replace with adding an item !!!!
+inventoryItem.checkIn(15);
 
 repository.save(inventoryItem, function(error) {
 	// TODO: Handle error + test error scenario!!
@@ -584,6 +648,29 @@ function thirdCommandHandler() {
 	console.log('======================================================');
 
 	repository.get(inventoryItemId, function(error, inventoryItem) {
+		inventoryItem.checkOut(7);
+
+		repository.save(inventoryItem, function(error) {
+			// TODO: Handle error + test error scenario!!
+			printEventStoreContent();
+
+			setTimeout(function() {
+				printReportDatabaseContent();
+			}, 2000);
+		});
+	});
+
+	setTimeout(function() {
+		fourthCommandHandler();
+	}, 4000);
+};
+
+function fourthCommandHandler() {
+	console.log('======================================================');
+	console.log('Begin fourth command handler');
+	console.log('======================================================');
+
+	repository.get(inventoryItemId, function(error, inventoryItem) {
 		inventoryItem.deactivate();
 
 		repository.save(inventoryItem, function(error) {
@@ -602,10 +689,17 @@ function printEventStoreContent() {
 }
 
 function printReportDatabaseContent() {
+	// console.log('******************************************************');
+	// console.log('Inventory reports');
+	// console.log('******************************************************');
+	// reportDatabase.getAllReports('InventoryReports', function(error, inventoryReports) {
+	// 	console.log(inventoryReports);
+	// });
+
 	console.log('******************************************************');
-	console.log('Inventory reports');
+	console.log('Inventory details reports');
 	console.log('******************************************************');
-	reportDatabase.getAllReports('InventoryReports', function(error, inventoryReports) {
-		console.log(inventoryReports);
+	reportDatabase.getAllReports('InventoryDetailsReports', function(error, inventoryDetailsReports) {
+		console.log(inventoryDetailsReports);
 	});
 }
