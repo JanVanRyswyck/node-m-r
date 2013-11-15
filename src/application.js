@@ -6,78 +6,10 @@ var util = require('util'),
 	_ = require('lodash');
 
 
-//
-// AggregateRoot
-//
-
-// TODO: Apply Class pattern from Mathias !!
-var AggregateRoot = exports.AggregateRoot = function(id) {
-	this._id = id;
-	this._version = this._eventVersion = 0;
-	this._transientEvents = [];
-
-	this._eventEmitter = new EventEmitter();
-	stream.Writable.call(this, { objectMode: true });	
-};
-
-util.inherits(AggregateRoot, stream.Writable);
-
-AggregateRoot.prototype.apply = function(eventName, domainEvent) {
-	var domainEvent;
-
-	this._eventVersion += 1;
-	enhanceDomainEvent(this, eventName, this._eventVersion, domainEvent);
-
-	this._transientEvents.push(domainEvent);
-	this._eventEmitter.emit(eventName, domainEvent);
-};
-
-AggregateRoot.prototype.getTransientEvents = function() {
-	return this._transientEvents;
-};
-
-AggregateRoot.prototype.getId = function() {
-	return this._id;
-};
-
-AggregateRoot.prototype.getVersion = function() {
-	return this._version;
-};
-
-AggregateRoot.prototype.onEvent = function(type, listener) {
-	return this._eventEmitter.on(type, listener);
-};
-
-AggregateRoot.prototype._write = function(domainEvent, encoding, next) {
-	this._eventEmitter.emit(domainEvent.eventName, domainEvent);
-	
-	this._eventVersion += 1;
-	this._version += 1;
-	next();
-};
-
-function enhanceDomainEvent(aggregateRoot, eventName, eventVersion, domainEvent) {
-	domainEvent.aggregateRootId = aggregateRoot._id;
-	domainEvent.eventId = uuidGenerator.v1();
-	domainEvent.eventName = eventName;
-	domainEvent.eventVersion = eventVersion;
-}
-
-
-
-
-//
-// InvalidOperationError
-//
-var InvalidOperationError = exports.InvalidOperationError = function(message, error) {
-	this.error = error;
-	this.name = 'InvalidOperationError';
-
-	Error.call(this, message);
-	Error.captureStackTrace(this, arguments.callee);
-};
-
-util.inherits(InvalidOperationError, Error);
+var MessageBus = require('./messageBus');
+var AggregateRoot = require('./aggregateRoot');
+var InvalidOperationError = require('./errors').InvalidOperationError;
+var inventoryItem = require('./inventoryItem');
 
 
 
@@ -175,7 +107,7 @@ var ConcurrencyViolationError = exports.ConcurrencyError = function(message, err
 util.inherits(ConcurrencyViolationError, Error);
 
 
-
+// TODO: Make EventStore a singleton!!
 //
 // EventStore
 //
@@ -469,10 +401,8 @@ InventoryReportAggregator.prototype.handleInventoryItemRenamed = function(messag
 			if(error)
 				return callback(error);
 
-			if(!inventoryReport) {
-				var errorMesage = util.format('The report for identifier "%d" could not be found in the data store.', message.aggregateRootId);
-				return callback(new ReportNotFoundError(errorMessage));
-			}
+			if(!inventoryReport) 
+				return reportNotFound(inventoryReport, callback);
 
 			inventoryReport.name = message.name;
 			callback(null);
@@ -483,6 +413,11 @@ InventoryReportAggregator.prototype.handleInventoryItemRenamed = function(messag
 InventoryReportAggregator.prototype.handleInventoryItemDeactivated = function(message, callback) {
 	reportDatabase.removeReport(INVENTORY_REPORTS, message.aggregateRootId, callback);
 };
+
+function reportNotFound(inventoryReport, callback) {
+	var errorMesage = util.format('The report with identifier "%d" could not be found in the data store.', message.aggregateRootId);
+	return callback(new ReportNotFoundError(errorMessage));
+}
 
 
 //
@@ -512,10 +447,8 @@ InventoryDetailsReportAggregator.prototype.handleInventoryItemRenamed = function
 			if(error)
 				return callback(error);
 
-			if(!inventoryReport) {
-				var errorMesage = util.format('The report for identifier "%d" could not be found in the data store.', message.aggregateRootId);
-				return callback(new ReportNotFoundError(errorMessage));
-			}
+			if(!inventoryReport)
+				return reportNotFound(inventoryReport, callback);
 
 			inventoryReport.name = message.name;
 			callback(null);
@@ -529,10 +462,8 @@ InventoryDetailsReportAggregator.prototype.handleItemsCheckedInToInventory = fun
 			if(error)
 				return callback(error);
 
-			if(!inventoryReport) {
-				var errorMesage = util.format('The report for identifier "%d" could not be found in the data store.', message.aggregateRootId);
-				return callback(new ReportNotFoundError(errorMessage));
-			}
+			if(!inventoryReport)
+				return reportNotFound(inventoryReport, callback);
 
 			inventoryReport.currentNumber += message.numberOfItems;
 			callback(null);
@@ -546,11 +477,9 @@ InventoryDetailsReportAggregator.prototype.handleItemsCheckedOutFromInventory = 
 			if(error)
 				return callback(error);
 
-			if(!inventoryReport) {
-				var errorMesage = util.format('The report for identifier "%d" could not be found in the data store.', message.aggregateRootId);
-				return callback(new ReportNotFoundError(errorMessage));
-			}
-
+			if(!inventoryReport)
+				return reportNotFound(inventoryReport, callback);
+			
 			inventoryReport.currentNumber -= message.numberOfItems;
 			callback(null);
 		}
@@ -561,27 +490,10 @@ InventoryDetailsReportAggregator.prototype.handleInventoryItemDeactivated = func
 	reportDatabase.removeReport(INVENTORY_DETAILS_REPORTS, message.aggregateRootId, callback);
 };
 
-//
-// MessageBus
-//
-var MessageBus = function() {
-	this._eventHandlers = [];
-};
-
-MessageBus.prototype.registerEventHandler = function(eventHandler) {
-	this._eventHandlers.push(eventHandler);
-};
-
-MessageBus.prototype.publish = function(domainEvent) {
-	this._eventHandlers.forEach(function(eventHandler) {
-		process.nextTick(function() {
-			eventHandler.write(domainEvent);	
-		});
-	});
-};
-
-
-
+function reportNotFound(inventoryReport, callback) {
+	var errorMesage = util.format('The report with identifier "%d" could not be found in the data store.', message.aggregateRootId);
+	callback(new ReportNotFoundError(errorMessage));
+}
 
 
 
@@ -604,7 +516,7 @@ console.log('======================================================');
 
 var inventoryItemId = uuidGenerator.v1();
 var inventoryItem = create(inventoryItemId, 'Something');
-inventoryItem.checkIn(15);
+inventoryItem.checkIn(15);		// TODO: Also make a separate command handler for this, but leave this within the create command handler to demonstrate 2 cmds!!
 
 repository.save(inventoryItem, function(error) {
 	// TODO: Handle error + test error scenario!!
