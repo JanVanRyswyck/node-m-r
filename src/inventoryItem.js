@@ -1,6 +1,7 @@
 var AggregateRoot = require('./aggregateRoot'),
     InvalidOperationError = require('./errors').InvalidOperationError,
-	util = require('util');
+	util = require('util'),
+	eventStore = require('./eventStore');
 
 exports.create = function create(id, name) {
 	return new InventoryItem(id, name);
@@ -84,8 +85,7 @@ InventoryItem.prototype.rename = function(name) {
 //
 // InventoryItemRepository
 //
-function InventoryItemRepository(messageBus) {
-	this._eventStore = new EventStore();   
+function InventoryItemRepository(messageBus) { 
 	this._messageBus = messageBus;
 };
 
@@ -93,7 +93,7 @@ InventoryItemRepository.prototype.save = function(inventoryItem, callback) {
 	var self = this;
 	var transientEvents = inventoryItem.getTransientEvents();
 
-	this._eventStore.save(transientEvents, inventoryItem.getId(), inventoryItem.getVersion(), function(error) {
+	eventStore.save(transientEvents, inventoryItem.getId(), inventoryItem.getVersion(), function(error) {
 		if(error)
 			return callback(error);
 
@@ -106,7 +106,7 @@ InventoryItemRepository.prototype.save = function(inventoryItem, callback) {
 }
 
 InventoryItemRepository.prototype.get = function(inventoryItemId, callback) {
-	this._eventStore.getAllEventsFor(inventoryItemId, function(error, eventStream) {
+	eventStore.getAllEventsFor(inventoryItemId, function(error, eventStream) {
 		if(error)
 			return callback(error);
 

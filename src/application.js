@@ -7,224 +7,9 @@ var util = require('util'),
 
 
 var MessageBus = require('./messageBus');
-var AggregateRoot = require('./aggregateRoot');
-var InvalidOperationError = require('./errors').InvalidOperationError;
-var inventoryItem = require('./inventoryItem');
-
-
-
-//
-// InventoryItem
-//
-var InventoryItem = function(id, name) {
-	var _this = this;	
-
-	this._activated = true;
-	this._name = '';
-	this._number = 0;
-
-	AggregateRoot.call(this, id);
-
-	this.onEvent('InventoryItemCreated', function(inventoryItemCreated) {
-		_this._activated = true;
-		_this._name = inventoryItemCreated.name;
-	});
-
-	this.onEvent('InventoryItemRenamed', function(inventoryItemRenamed) {
-		_this._name = inventoryItemRenamed.name;
-	});
-
-	this.onEvent('ItemsCheckedInToInventory', function(itemsCheckedInToInventory) {
-		_this._number += itemsCheckedInToInventory.numberOfItems;
-	});
-
-	this.onEvent('ItemsCheckedOutFromInventory', function(itemsCheckedOutFromInventory) {
-		_this._number -= itemsCheckedOutFromInventory.numberOfItems;
-	});
-
-	this.onEvent('InventoryItemDeactivated', function(inventoryItemDeactivated) {
-		_this._activated = false;
-	});
-
-	// TODO Jan: Move this to some sort of initialize method on the prototype and get rid of the create factory method => see class impl CoffeeScript??
-	if(name) {
-		this.apply('InventoryItemCreated', {
-			name: name
-		});	
-	}
-};
-
-util.inherits(InventoryItem, AggregateRoot);
-
-InventoryItem.prototype.checkIn = function(numberOfItems) {
-	this.apply('ItemsCheckedInToInventory', {
-		numberOfItems: numberOfItems
-	});
-};
-
-InventoryItem.prototype.checkOut = function(numberOfItems) {
-	if((this._number - numberOfItems) < 0) {
-		var errorMesage = util.format('The inventory needs to replenished in order to checkout %d items.', numberOfItems);
-		throw new InvalidOperationError(errorMesage);
-	}
-
-	this.apply('ItemsCheckedOutFromInventory', {
-		numberOfItems: numberOfItems
-	});
-};
-
-InventoryItem.prototype.deactivate = function() {
-	if(!this._activated)
-		throw new InvalidOperationError('This inventory item has already been deactivated.');
-
-	this.apply('InventoryItemDeactivated', {});
-};
-
-InventoryItem.prototype.rename = function(name) {
-	this.apply('InventoryItemRenamed', {
-		name: name
-	});
-};
-
-// This function should be exported
-var create = function(id, name) {
-	return new InventoryItem(id, name);
-};
-
-
-
-//
-// ConcurrencyError
-//
-var ConcurrencyViolationError = exports.ConcurrencyError = function(message, error) {
-	this.error = error;
-	this.name = 'ConcurrencyViolationError';
-
-	Error.call(this, message);
-	Error.captureStackTrace(this, arguments.callee);
-};
-
-util.inherits(ConcurrencyViolationError, Error);
-
-
-// TODO: Make EventStore a singleton!!
-//
-// EventStore
-//
-var EventStore = function() {
-	this._store = [];
-};
-
-EventStore.prototype.getAllEventsFor = function(aggregateRootId, callback) {
-	findStoredDomainEvents(this, aggregateRootId, function(error, storedDocument) {
-		var eventStream;
-
-		if(error)
-			return callback(error);
-					
-		if(!storedDocument)
-			return callback(null);
-
-		eventStream = new stream.PassThrough({ objectMode: true });
-
-		storedDocument.events.forEach(function(domainEvent) {
-			eventStream.write(domainEvent);
-		});
-
-		eventStream.end();
-		callback(null, eventStream);
-	});
-};
-
-EventStore.prototype.save = function(domainEvents, aggregateRootId, expectedAggregateRootVersion, callback) {
-	var self = this;
-
-	findStoredDomainEvents(this, aggregateRootId, function(error, storedDocument) {
-		if(error)
-			return callback(error);
-
-		if(!storedDocument) {
-			var storedDocument = {
-				id: aggregateRootId,
-				events: domainEvents
-			};
-
-			self._store.push(storedDocument);
-			return callback(null);
-		}
-
-		if(_.last(storedDocument.events).eventVersion !== expectedAggregateRootVersion) {
-			var concurrencyViolation = new ConcurrencyViolationError('An operation has been performed on an aggregate root that is out of date.');
-			return callback(concurrencyViolation);
-		}
-
-		domainEvents.forEach(function(domainEvent) {
-			storedDocument.events.push(domainEvent);
-		});
-
-		callback(null);
-	});
-}
-
-function findStoredDomainEvents(eventStore, aggregateRootId, callback) {
-	process.nextTick(function() {
-		var storedDocument = _.find(eventStore._store, function(document) {
-			return document.id === aggregateRootId;
-		});
-
-		callback(null, storedDocument);
-	});
-}
-
-
-
-// TODO: In the same module as InventoryItem
-//
-// InventoryItemRepository
-//
-var InventoryItemRepository = function(messageBus) {
-	this._eventStore = new EventStore();   // TODO: Make EventStore a singleton!!
-	this._messageBus = messageBus;
-};
-
-InventoryItemRepository.prototype.save = function(inventoryItem, callback) {
-	var self = this;
-	var transientEvents = inventoryItem.getTransientEvents();
-
-	this._eventStore.save(transientEvents, inventoryItem.getId(), inventoryItem.getVersion(), function(error) {
-		if(error)
-			return callback(error);
-
-		transientEvents.forEach(function(domainEvent) {
-			self._messageBus.publish(domainEvent);
-		});
-		
-		callback(null);	// TODO: Do some serious error handling	
-	});
-}
-
-InventoryItemRepository.prototype.get = function(inventoryItemId, callback) {
-	this._eventStore.getAllEventsFor(inventoryItemId, function(error, eventStream) {
-		if(error)
-			return callback(error);
-
-		if(!eventStream)
-			return callback(null);
-
-		var inventoryItem = new InventoryItem(inventoryItemId);
-
-		eventStream.pipe(inventoryItem)
-			.on('error', function(error) {
-				callback(error);
-			})
-			.on('finish', function() {
-				eventStream.unpipe();
-				callback(null, inventoryItem);
-			});
-	});
-};
-
-
+var createInventoryItem = require('./inventoryItem').create;
+var InventoryItemRepository = require('./inventoryItem').Repository;
+var eventStore = require('./eventStore');
 
 
 
@@ -511,11 +296,11 @@ messageBus.registerEventHandler(inventoryDetailsReportAggregator);
 
 
 console.log('======================================================');
-console.log('Begin first command handler');
+console.log('CreateInventoryItem command handler');
 console.log('======================================================');
 
 var inventoryItemId = uuidGenerator.v1();
-var inventoryItem = create(inventoryItemId, 'Something');
+var inventoryItem = createInventoryItem(inventoryItemId, 'Something');
 inventoryItem.checkIn(15);		// TODO: Also make a separate command handler for this, but leave this within the create command handler to demonstrate 2 cmds!!
 
 repository.save(inventoryItem, function(error) {
@@ -533,7 +318,7 @@ setTimeout(function() {
 
 function secondCommandHandler() {
 	console.log('======================================================');
-	console.log('Begin second command handler');
+	console.log('RenameInventoryItem command handler');
 	console.log('======================================================');
 
 	repository.get(inventoryItemId, function(error, inventoryItem) {
@@ -556,7 +341,7 @@ function secondCommandHandler() {
 
 function thirdCommandHandler() {
 	console.log('======================================================');
-	console.log('Begin third command handler');
+	console.log('CheckoutItemsFromInventory command handler');
 	console.log('======================================================');
 
 	repository.get(inventoryItemId, function(error, inventoryItem) {
@@ -579,7 +364,7 @@ function thirdCommandHandler() {
 
 function fourthCommandHandler() {
 	console.log('======================================================');
-	console.log('Begin fourth command handler');
+	console.log('DeactivateInventoryItem command handler');
 	console.log('======================================================');
 
 	repository.get(inventoryItemId, function(error, inventoryItem) {
@@ -597,7 +382,7 @@ function fourthCommandHandler() {
 };
 
 function printEventStoreContent() {
-	_.forEach(repository._eventStore._store, function(document) { console.log(document.events); });
+	_.forEach(eventStore.createDump(), function(document) { console.log(document.events); });
 }
 
 function printReportDatabaseContent() {

@@ -12,3 +12,16 @@ var InvalidOperationError = exports.InvalidOperationError = function(message, er
 };
 
 util.inherits(InvalidOperationError, Error);
+
+//
+// ConcurrencyError
+//
+var ConcurrencyViolationError = exports.ConcurrencyError = function(message, error) {
+	this.error = error;
+	this.name = 'ConcurrencyViolationError';
+
+	Error.call(this, message);
+	Error.captureStackTrace(this, arguments.callee);
+};
+
+util.inherits(ConcurrencyViolationError, Error);
