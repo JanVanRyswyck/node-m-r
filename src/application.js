@@ -10,110 +10,8 @@ var MessageBus = require('./messageBus');
 var createInventoryItem = require('./inventoryItem').create;
 var InventoryItemRepository = require('./inventoryItem').Repository;
 var eventStore = require('./eventStore');
+var reportDatabase = require('./reportDatabase');
 
-
-
-//
-// InvalidDataAreaError
-//
-var InvalidDataAreaError = exports.InvalidDataAreaError = function(message, error) {
-	this.error = error;
-	this.name = 'InvalidDataAreaError';
-
-	Error.call(this, message);
-	Error.captureStackTrace(this, arguments.callee);
-};
-
-util.inherits(InvalidDataAreaError, Error);
-
-//
-// ReportDatabase
-//
-
-var reportDatabase = (function() {
-	var _this = {};
-
-	var _dataAreas = {
-		InventoryReports: [],
-		InventoryDetailsReports: []
-	};
-
-	_this.getReport = function(dataArea, id, callback) {
-		simulateAsynchronousIO(function() {
-			getReportsCollectionFor(dataArea).fold(
-				function left(error) {
-					callback(error);
-				},
-				function right(reportsCollection) {
-					var requestedReport = _.find(reportsCollection, function(report) {
-						return report.id === id;
-					});
-
-					callback(null, requestedReport);
-				}
-			);
-		});
-	};
-
-	_this.getAllReports = function(dataArea, callback) {
-		simulateAsynchronousIO(function() {
-			getReportsCollectionFor(dataArea).fold(
-				function left(error) {
-					callback(error);
-				},
-				function right(reportsCollection) {
-					callback(null, reportsCollection);
-				}
-			);
-		});
-	};
-
-	_this.insertReport = function(dataArea, inventoryReport, callback) {
-		simulateAsynchronousIO(function() {
-			getReportsCollectionFor(dataArea).fold(
-				function left(error) { 
-					callback(error); 
-				},
-				function right(reportsCollection) {
-					reportsCollection.push(inventoryReport);
-					callback(null);		
-				}
-			);
-		});
-	};
-
-	_this.removeReport = function(dataArea, id, callback) {
-		simulateAsynchronousIO(function() {
-			getReportsCollectionFor(dataArea).fold(
-				function left(error) {
-					callback(error);
-				},
-				function right(reportsCollection) {
-					_.remove(reportsCollection, function(report) {
-						return report.id === id;
-					});
-
-					callback(null);
-				}
-			);
-		});
-	};
-
-	function simulateAsynchronousIO(asynchronousAction) {
-		process.nextTick(asynchronousAction);
-	}
-
-	function getReportsCollectionFor(dataArea) {
-		reportsCollection = _dataAreas[dataArea];
-
-		if(reportsCollection)
-			return either.right(reportsCollection);
-		else
-			return either.left(new InvalidDataAreaError('The specified data area is unknown.'));
-	}
-
-	return _this;
-})();
 
 
 
@@ -382,21 +280,15 @@ function fourthCommandHandler() {
 };
 
 function printEventStoreContent() {
+	console.log('******************************************************');
+	console.log('Event store');
+	console.log('******************************************************');
 	_.forEach(eventStore.createDump(), function(document) { console.log(document.events); });
 }
 
 function printReportDatabaseContent() {
-	// console.log('******************************************************');
-	// console.log('Inventory reports');
-	// console.log('******************************************************');
-	// reportDatabase.getAllReports('InventoryReports', function(error, inventoryReports) {
-	// 	console.log(inventoryReports);
-	// });
-
 	console.log('******************************************************');
-	console.log('Inventory details reports');
+	console.log('Report database');
 	console.log('******************************************************');
-	reportDatabase.getAllReports('InventoryDetailsReports', function(error, inventoryDetailsReports) {
-		console.log(inventoryDetailsReports);
-	});
+	console.log(reportDatabase.createDump());
 }

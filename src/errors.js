@@ -13,6 +13,7 @@ var InvalidOperationError = exports.InvalidOperationError = function(message, er
 
 util.inherits(InvalidOperationError, Error);
 
+
 //
 // ConcurrencyError
 //
@@ -25,3 +26,17 @@ var ConcurrencyViolationError = exports.ConcurrencyError = function(message, err
 };
 
 util.inherits(ConcurrencyViolationError, Error);
+
+
+//
+// InvalidDataAreaError
+//
+var InvalidDataAreaError = exports.InvalidDataAreaError = function(message, error) {
+	this.error = error;
+	this.name = 'InvalidDataAreaError';
+
+	Error.call(this, message);
+	Error.captureStackTrace(this, arguments.callee);
+};
+
+util.inherits(InvalidDataAreaError, Error);
