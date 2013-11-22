@@ -40,3 +40,17 @@ var InvalidDataAreaError = exports.InvalidDataAreaError = function(message, erro
 };
 
 util.inherits(InvalidDataAreaError, Error);
+
+
+//
+// ReportNotFoundError
+//
+var ReportNotFoundError = exports.ReportNotFoundError = function(message, error) {
+	this.error = error;
+	this.name = 'ReportNotFoundError';
+
+	Error.call(this, message);
+	Error.captureStackTrace(this, arguments.callee);
+};
+
+util.inherits(ReportNotFoundError, Error);
