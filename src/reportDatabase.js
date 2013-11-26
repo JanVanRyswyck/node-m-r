@@ -39,7 +39,7 @@ var reportDatabase = (function() {
 				},
 				function right(reportsCollection) {
 					reportsCollection.push(inventoryReport);
-					callback(null);		
+					callback();		
 				}
 			);
 		});
@@ -56,7 +56,7 @@ var reportDatabase = (function() {
 						return report.id === id;
 					});
 
-					callback(null);
+					callback();
 				}
 			);
 		});

@@ -15,7 +15,7 @@ var domain = {
 //
 // Bootstrapping code
 //
-var messageBus = new MessageBus();
+var messageBus = new MessageBus(); // TODO: Make message bus a singleton
 var repository = new domain.InventoryItemRepository(messageBus);
 
 var inventoryReportAggregator = new reporting.InventoryReportAggregator();

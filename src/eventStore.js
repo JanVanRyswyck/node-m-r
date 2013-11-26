@@ -17,7 +17,7 @@ var eventStore = (function() {
 				return callback(error);
 						
 			if(!storedDocument)
-				return callback(null);
+				return callback();
 
 			eventStream = new stream.PassThrough({ objectMode: true });
 
@@ -42,7 +42,7 @@ var eventStore = (function() {
 				};
 
 				_store.push(storedDocument);
-				return callback(null);
+				return callback();
 			}
 
 			if(_.last(storedDocument.events).eventVersion !== expectedAggregateRootVersion) {
@@ -54,18 +54,22 @@ var eventStore = (function() {
 				storedDocument.events.push(domainEvent);
 			});
 
-			callback(null);
+			callback();
 		});
 	};
 
 	function findStoredDomainEvents(aggregateRootId, callback) {
-		process.nextTick(function() {
+		simulateAsynchronousIO(function() {
 			var storedDocument = _.find(_store, function(document) {
 				return document.id === aggregateRootId;
 			});
 
 			callback(null, storedDocument);
 		});
+	}
+
+	function simulateAsynchronousIO(asynchronousAction) {
+		process.nextTick(asynchronousAction);
 	}
 
 	return _this;

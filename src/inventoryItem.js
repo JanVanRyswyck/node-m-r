@@ -20,29 +20,8 @@ function InventoryItem(id, name) {
 	this._number = 0;
 
 	AggregateRoot.call(this, id);
+	subscribeToDomainEvents(this);
 
-	this.onEvent('InventoryItemCreated', function(inventoryItemCreated) {
-		_this._activated = true;
-		_this._name = inventoryItemCreated.name;
-	});
-
-	this.onEvent('InventoryItemRenamed', function(inventoryItemRenamed) {
-		_this._name = inventoryItemRenamed.name;
-	});
-
-	this.onEvent('ItemsCheckedInToInventory', function(itemsCheckedInToInventory) {
-		_this._number += itemsCheckedInToInventory.numberOfItems;
-	});
-
-	this.onEvent('ItemsCheckedOutFromInventory', function(itemsCheckedOutFromInventory) {
-		_this._number -= itemsCheckedOutFromInventory.numberOfItems;
-	});
-
-	this.onEvent('InventoryItemDeactivated', function(inventoryItemDeactivated) {
-		_this._activated = false;
-	});
-
-	// TODO Jan: Move this to some sort of initialize method on the prototype and get rid of the create factory method => see class impl CoffeeScript??
 	if(name) {
 		this.apply('InventoryItemCreated', {
 			name: name
@@ -82,6 +61,32 @@ InventoryItem.prototype.rename = function(name) {
 	});
 };
 
+function subscribeToDomainEvents(inventoryItem) {
+	var _this = inventoryItem;
+
+	inventoryItem.onEvent('InventoryItemCreated', function(inventoryItemCreated) {
+		_this._activated = true;
+		_this._name = inventoryItemCreated.name;
+	});
+
+	inventoryItem.onEvent('InventoryItemRenamed', function(inventoryItemRenamed) {
+		_this._name = inventoryItemRenamed.name;
+	});
+
+	inventoryItem.onEvent('ItemsCheckedInToInventory', function(itemsCheckedInToInventory) {
+		_this._number += itemsCheckedInToInventory.numberOfItems;
+	});
+
+	inventoryItem.onEvent('ItemsCheckedOutFromInventory', function(itemsCheckedOutFromInventory) {
+		_this._number -= itemsCheckedOutFromInventory.numberOfItems;
+	});
+
+	inventoryItem.onEvent('InventoryItemDeactivated', function(inventoryItemDeactivated) {
+		_this._activated = false;
+	});
+}
+
+
 //
 // InventoryItemRepository
 //
@@ -101,7 +106,7 @@ InventoryItemRepository.prototype.save = function(inventoryItem, callback) {
 			self._messageBus.publish(domainEvent);
 		});
 		
-		callback(null);	// TODO: Do some serious error handling	
+		callback();	
 	});
 }
 
@@ -111,7 +116,7 @@ InventoryItemRepository.prototype.get = function(inventoryItemId, callback) {
 			return callback(error);
 
 		if(!eventStream)
-			return callback(null);
+			return callback();
 
 		var inventoryItem = new InventoryItem(inventoryItemId);
 

@@ -61,10 +61,10 @@ InventoryReportAggregator.prototype.handleInventoryItemRenamed = function(messag
 				return callback(error);
 
 			if(!inventoryReport) 
-				return reportNotFound(inventoryReport, callback);
+				return reportNotFound(message.aggregateRootId, callback);
 
 			inventoryReport.name = message.name;
-			callback(null);
+			callback();
 		}
 	);
 };
@@ -72,11 +72,6 @@ InventoryReportAggregator.prototype.handleInventoryItemRenamed = function(messag
 InventoryReportAggregator.prototype.handleInventoryItemDeactivated = function(message, callback) {
 	reportDatabase.removeReport(INVENTORY_REPORTS, message.aggregateRootId, callback);
 };
-
-function reportNotFound(inventoryReport, callback) {
-	var errorMesage = util.format('The report with identifier "%d" could not be found in the data store.', message.aggregateRootId);
-	return callback(new ReportNotFoundError(errorMessage));
-}
 
 
 //
@@ -107,10 +102,10 @@ InventoryDetailsReportAggregator.prototype.handleInventoryItemRenamed = function
 				return callback(error);
 
 			if(!inventoryReport)
-				return reportNotFound(inventoryReport, callback);
+				return reportNotFound(message.aggregateRootId, callback);
 
 			inventoryReport.name = message.name;
-			callback(null);
+			callback();
 		}
 	);
 };
@@ -122,10 +117,10 @@ InventoryDetailsReportAggregator.prototype.handleItemsCheckedInToInventory = fun
 				return callback(error);
 
 			if(!inventoryReport)
-				return reportNotFound(inventoryReport, callback);
+				return reportNotFound(message.aggregateRootId, callback);
 
 			inventoryReport.currentNumber += message.numberOfItems;
-			callback(null);
+			callback();
 		}
 	);
 };
@@ -137,10 +132,10 @@ InventoryDetailsReportAggregator.prototype.handleItemsCheckedOutFromInventory = 
 				return callback(error);
 
 			if(!inventoryReport)
-				return reportNotFound(inventoryReport, callback);
+				return reportNotFound(message.aggregateRootId, callback);
 			
 			inventoryReport.currentNumber -= message.numberOfItems;
-			callback(null);
+			callback();
 		}
 	);
 };
@@ -149,7 +144,11 @@ InventoryDetailsReportAggregator.prototype.handleInventoryItemDeactivated = func
 	reportDatabase.removeReport(INVENTORY_DETAILS_REPORTS, message.aggregateRootId, callback);
 };
 
-function reportNotFound(inventoryReport, callback) {
-	var errorMesage = util.format('The report with identifier "%d" could not be found in the data store.', message.aggregateRootId);
+
+//
+// Helper functions
+//
+function reportNotFound(aggregateRootId, callback) {
+	var errorMesage = util.format('The report with identifier "%d" could not be found in the data store.', aggregateRootId);
 	callback(new ReportNotFoundError(errorMessage));
 }
