@@ -26,7 +26,7 @@ var inventoryItemId = uuidGenerator.v1();
 
 		printCurrentStateOfTheApplication();
 		setTimeout(function() { step02(); }, 5000);
-	});	
+	});
 })();
 
 function step02() {
@@ -48,7 +48,7 @@ function step02() {
 		printCurrentStateOfTheApplication();
 		setTimeout(function() { step03(); }, 5000);
 	});
-};
+}
 
 function step03() {
 	console.log('======================================================');
@@ -69,7 +69,7 @@ function step03() {
 		printCurrentStateOfTheApplication();
 		setTimeout(function() { step04(); }, 5000);
 	});
-};
+}
 
 function step04() {
 	console.log('======================================================');
@@ -88,7 +88,7 @@ function step04() {
 
 		printCurrentStateOfTheApplication();
 	});
-};
+}
 
 function printCurrentStateOfTheApplication() {
 	printEventStoreContent();
