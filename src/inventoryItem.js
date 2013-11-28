@@ -1,7 +1,8 @@
 var AggregateRoot = require('./aggregateRoot'),
     InvalidOperationError = require('./errors').InvalidOperationError,
 	util = require('util'),
-	eventStore = require('./eventStore');
+	eventStore = require('./eventStore'),
+	messageBus = require('./messageBus');
 
 exports.create = function create(id, name) {
 	return new InventoryItem(id, name);
@@ -90,12 +91,10 @@ function subscribeToDomainEvents(inventoryItem) {
 //
 // InventoryItemRepository
 //
-function InventoryItemRepository(messageBus) { 
-	this._messageBus = messageBus;
+function InventoryItemRepository() { 
 };
 
 InventoryItemRepository.prototype.save = function(inventoryItem, callback) {
-	var self = this;
 	var transientEvents = inventoryItem.getTransientEvents();
 
 	eventStore.save(transientEvents, inventoryItem.getId(), inventoryItem.getVersion(), function(error) {
@@ -103,7 +102,7 @@ InventoryItemRepository.prototype.save = function(inventoryItem, callback) {
 			return callback(error);
 
 		transientEvents.forEach(function(domainEvent) {
-			self._messageBus.publish(domainEvent);
+			messageBus.publish(domainEvent);
 		});
 		
 		callback();	

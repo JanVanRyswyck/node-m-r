@@ -1,115 +1,103 @@
 var uuidGenerator = require('node-uuid'),
-	_ = require('lodash');
-
-var MessageBus = require('./messageBus'),
-	inventoryItem = require('./inventoryItem'),
+	_ = require('lodash'),
 	eventStore = require('./eventStore'),
 	reportDatabase = require('./reportDatabase'),
-	reporting = require('./reportAggregators');
+	commandHandlers = require('./commandHandlers');
 
-var domain = {
-	createInventoryItem: inventoryItem.create,
-	InventoryItemRepository: inventoryItem.Repository
-};
-
-//
-// Bootstrapping code
-//
-var messageBus = new MessageBus(); // TODO: Make message bus a singleton
-var repository = new domain.InventoryItemRepository(messageBus);
-
-var inventoryReportAggregator = new reporting.InventoryReportAggregator();
-messageBus.registerEventHandler(inventoryReportAggregator);
-
-var inventoryDetailsReportAggregator = new reporting.InventoryDetailsReportAggregator();
-messageBus.registerEventHandler(inventoryDetailsReportAggregator);
-
-
-console.log('======================================================');
-console.log('CreateInventoryItem command handler');
-console.log('======================================================');
+require('./bootstrapper').bootstrap();
 
 var inventoryItemId = uuidGenerator.v1();
-var inventoryItem = domain.createInventoryItem(inventoryItemId, 'Something');
-inventoryItem.checkIn(15);		// TODO: Also make a separate command handler for this, but leave this within the create command handler to demonstrate 2 cmds!!
 
-repository.save(inventoryItem, function(error) {
-	// TODO: Handle error + test error scenario!!
+(function step01() {
+	console.log('======================================================');
+	console.log('Run the CreateInventoryItem command handler');
+	console.log('======================================================');
+
+	var command = {
+		inventoryItemId: inventoryItemId,
+		name: 'Something'
+	};
+
+	commandHandlers.createInventoryItem(command, function(error) {
+		if(error) {
+			console.log(error);
+			return;
+		}
+
+		printCurrentStateOfTheApplication();
+		setTimeout(function() { step02(); }, 5000);
+	});	
+})();
+
+function step02() {
+	console.log('======================================================');
+	console.log('Run the RenameInventoryItem command handler');
+	console.log('======================================================');
+
+	var command = {
+		inventoryItemId: inventoryItemId,
+		name: 'Something entirely different'
+	};
+
+	commandHandlers.renameInventoryItem(command, function(error) {
+		if(error) {
+			console.log(error);
+			return;
+		}
+
+		printCurrentStateOfTheApplication();
+		setTimeout(function() { step03(); }, 5000);
+	});
+};
+
+function step03() {
+	console.log('======================================================');
+	console.log('Run the CheckoutItemsFromInventory command handler');
+	console.log('======================================================');
+
+	var command = {
+		inventoryItemId: inventoryItemId,
+		numberOfItems: 7
+	};
+
+	commandHandlers.checkoutItemsFromInventory(command, function(error) {
+		if(error) {
+			console.log(error);
+			return;
+		}
+
+		printCurrentStateOfTheApplication();
+		setTimeout(function() { step04(); }, 5000);
+	});
+};
+
+function step04() {
+	console.log('======================================================');
+	console.log('Run the DeactivateInventoryItem command handler');
+	console.log('======================================================');
+
+	var command = {
+		inventoryItemId: inventoryItemId
+	};
+
+	commandHandlers.deactivateInventoryItem(command, function(error) {
+		if(error) {
+			console.log(error);
+			return;
+		}
+
+		printCurrentStateOfTheApplication();
+	});
+};
+
+function printCurrentStateOfTheApplication() {
 	printEventStoreContent();
 
+	// Give the report database some time to catch up
 	setTimeout(function() {
 		printReportDatabaseContent();
 	}, 2000);
-});
-
-setTimeout(function() {
-	secondCommandHandler();
-}, 4000);
-
-function secondCommandHandler() {
-	console.log('======================================================');
-	console.log('RenameInventoryItem command handler');
-	console.log('======================================================');
-
-	repository.get(inventoryItemId, function(error, inventoryItem) {
-		inventoryItem.rename('Something entirely different');
-
-		repository.save(inventoryItem, function(error) {
-			// TODO: Handle error + test error scenario!!
-			printEventStoreContent();
-
-			setTimeout(function() {
-				printReportDatabaseContent();
-			}, 2000);
-		});
-	});
-
-	setTimeout(function() {
-		thirdCommandHandler();
-	}, 4000);
-};
-
-function thirdCommandHandler() {
-	console.log('======================================================');
-	console.log('CheckoutItemsFromInventory command handler');
-	console.log('======================================================');
-
-	repository.get(inventoryItemId, function(error, inventoryItem) {
-		inventoryItem.checkOut(7);
-
-		repository.save(inventoryItem, function(error) {
-			// TODO: Handle error + test error scenario!!
-			printEventStoreContent();
-
-			setTimeout(function() {
-				printReportDatabaseContent();
-			}, 2000);
-		});
-	});
-
-	setTimeout(function() {
-		fourthCommandHandler();
-	}, 4000);
-};
-
-function fourthCommandHandler() {
-	console.log('======================================================');
-	console.log('DeactivateInventoryItem command handler');
-	console.log('======================================================');
-
-	repository.get(inventoryItemId, function(error, inventoryItem) {
-		inventoryItem.deactivate();
-
-		repository.save(inventoryItem, function(error) {
-			// TODO: Handle error + test error scenario!!
-			printEventStoreContent();
-
-			setTimeout(function() {
-				printReportDatabaseContent();
-			}, 2000);
-		});
-	});
-};
+}
 
 function printEventStoreContent() {
 	console.log('******************************************************');

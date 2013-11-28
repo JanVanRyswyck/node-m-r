@@ -32,11 +32,13 @@ var eventStore = (function() {
 
 	_this.save = function(domainEvents, aggregateRootId, expectedAggregateRootVersion, callback) {
 		findStoredDomainEvents(aggregateRootId, function(error, storedDocument) {
+			var storedDocument, concurrencyViolation;
+
 			if(error)
 				return callback(error);
 
 			if(!storedDocument) {
-				var storedDocument = {
+				storedDocument = {
 					id: aggregateRootId,
 					events: domainEvents
 				};
@@ -46,7 +48,7 @@ var eventStore = (function() {
 			}
 
 			if(_.last(storedDocument.events).eventVersion !== expectedAggregateRootVersion) {
-				var concurrencyViolation = new ConcurrencyViolationError('An operation has been performed on an aggregate root that is out of date.');
+				concurrencyViolation = new ConcurrencyViolationError('An operation has been performed on an aggregate root that is out of date.');
 				return callback(concurrencyViolation);
 			}
 
@@ -74,6 +76,5 @@ var eventStore = (function() {
 
 	return _this;
 })();
-
 
 module.exports = eventStore;
