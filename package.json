@@ -7,8 +7,9 @@
     "node": "0.10.x"
   },
   "dependencies": {
-    "eventemitter2": "0.4.x",
-    "lodash": "2.x.x",
-    "node-uuid": "1.x.x"
+    "eventemitter2": "~0.4.x",
+    "lodash": "~2.x.x",
+    "node-uuid": "~1.x.x",
+    "either.js": "~0.0.1"
   }
 }

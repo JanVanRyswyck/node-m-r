@@ -1,4 +1,4 @@
-var either = require('./either')
+var either = require('either.js')
 	_ = require('lodash'),
 	InvalidDataAreaError = require('./errors').InvalidDataAreaError;
 
