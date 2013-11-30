@@ -1,6 +1,7 @@
 # node-m-r
 
-Greg Young's simple CQRS example written using Node.js ([https://github.com/gregoryyoung/m-r)](https://github.com/gregoryyoung/m-r)).
+Greg Young's simple CQRS example written using Node.js.
+[https://github.com/gregoryyoung/m-r)](https://github.com/gregoryyoung/m-r).
 
 ## Build
 
