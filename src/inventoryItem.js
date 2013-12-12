@@ -1,3 +1,5 @@
+'use strict';
+
 var AggregateRoot = require('./aggregateRoot'),
     InvalidOperationError = require('./errors').InvalidOperationError,
 	util = require('util'),

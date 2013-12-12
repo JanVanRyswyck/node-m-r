@@ -1,7 +1,9 @@
+'use strict';
+
 var EventEmitter = require('eventemitter2').EventEmitter2,
-    util = require('util'),
-    stream = require('stream'),
-    uuidGenerator = require('node-uuid');
+      util = require('util'),
+      stream = require('stream'),
+      uuidGenerator = require('node-uuid');
 
 module.exports = AggregateRoot;
 

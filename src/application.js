@@ -1,3 +1,5 @@
+'use strict';
+
 var uuidGenerator = require('node-uuid'),
 	_ = require('lodash'),
 	eventStore = require('./eventStore'),

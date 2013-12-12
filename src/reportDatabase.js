@@ -1,4 +1,6 @@
-var either = require('either.js')
+'use strict';
+
+var either = require('either.js'),
 	_ = require('lodash'),
 	InvalidDataAreaError = require('./errors').InvalidDataAreaError;
 
@@ -67,7 +69,7 @@ var reportDatabase = (function() {
 	}
 
 	function getReportsCollectionFor(dataArea) {
-		reportsCollection = _dataAreas[dataArea];
+		var reportsCollection = _dataAreas[dataArea];
 
 		if(reportsCollection)
 			return either.right(reportsCollection);

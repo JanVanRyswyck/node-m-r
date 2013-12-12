@@ -1,3 +1,5 @@
+'use strict';
+
 var inventoryItemDomain = require('./inventoryItem'),
 	MessageBus = require('./messageBus');
 

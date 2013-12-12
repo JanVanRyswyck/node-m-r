@@ -1,3 +1,5 @@
+'use strict';
+
 var reporting = require('./reportAggregators'),
 	messageBus = require('./messageBus');
 

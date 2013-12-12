@@ -1,4 +1,7 @@
+'use strict';
+
 var stream = require('stream'),
+	_ = require('lodash'),
     ConcurrencyViolationError = require('./errors').ConcurrencyViolationError;
 
 var eventStore = (function() {
